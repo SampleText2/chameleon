@@ -14,7 +14,10 @@ app.use(express.static('client'));
 const WORDS = {
   Fruits: ['Apple','Mango','Kiwi','Pineapple','Strawberry','Banana'],
   Movies: ['Inception','Titanic','Avatar','Frozen','The Matrix','Jaws'],
-  Animals: ['Lion','Elephant','Giraffe','Penguin','Kangaroo','Dolphin']
+  Animals: ['Lion','Elephant','Giraffe','Penguin','Kangaroo','Dolphin'],
+  Singers: ["Beyoncé","Adele","Ed Sheeran","Taylor Swift","Bruno Mars","Lady Gaga","Justin Bieber","Rihanna","Ariana Grande",,"Michael Jackson","Billie Eilish","Elton John","Shakira","Frank Sinatra","Katy Perry","Madonna","Elvis Presley","David Bowie","Dua Lipa","Post Malone","Sam Smith","The Weeknd","Harry Styles","Selena Gomez","Drake","Jennifer Lopez","Celine Dion","Whitney Houston","Prince","Khalid","Miley Cyrus","John Lennon","Paul McCartney","Alicia Keys","Cardi B","Camila Cabello","Travis Scott","Lizzo","Nicki Minaj","Usher","Mariah Carey","Christina Aguilera","Shawn Mendes","Sia","Cher","Bob Dylan","Amy Winehouse","Stevie Wonder"],
+  Celebrities: ["Kim Kardashian","Kanye West","Oprah Winfrey","Ellen DeGeneres","Dwayne Johnson","Taylor Swift","Beyoncé","Brad Pitt","Angelina Jolie","Leonardo DiCaprio","Johnny Depp","Rihanna","Justin Bieber","Ariana Grande","Will Smith","Chris Hemsworth","Chris Evans","Scarlett Johansson","Gal Gadot","Kylie Jenner","Kendall Jenner","Selena Gomez","Demi Lovato","Miley Cyrus","Robert Downey Jr.","Tom Cruise","Emma Watson","Jennifer Lawrence","Natalie Portman","Charlize Theron","Keanu Reeves","Zendaya","Harry Styles","Drake","Cardi B","Nicki Minaj","Megan Thee Stallion","Chris Pratt","Galileo Paltrow","Jason Momoa","Matt Damon","George Clooney","Hugh Jackman","Margot Robbie","Timothée Chalamet","Zendaya","Shakira","Elon Musk","Oprah Winfrey"],
+  Foods: ["Pizza","Burger","Sushi","Pasta","Salad","Chocolate","Ice Cream","Steak","Sandwich","Pancakes","Tacos","Fries","Doughnut","Soup","Rice","Noodles","Cheeseburger","Hot Dog","Bagel","Omelette"]
 };
 
 /* ---------- In-memory rooms ---------- */
