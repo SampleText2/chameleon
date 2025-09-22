@@ -1,5 +1,5 @@
 // client/app.js
-const socket = io();
+const socket = io("https://chameleon-twoq.onrender.com");
 
 // UI refs
 const screenJoin = document.getElementById('screen-join');
