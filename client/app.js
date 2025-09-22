@@ -2,7 +2,7 @@
 // Chameleon App Client
 // ====================
 
-const socket = io();
+const socket = io("https://chameleon-twoq.onrender.com");
 
 // ---------- UI References ----------
 const screenJoin = document.getElementById('screen-join');
