@@ -1,10 +1,8 @@
-// ====================
-// Chameleon App Client
-// ====================
-
 const socket = io();
 
-// ---------- UI References ----------
+// -----------------
+// UI references
+// -----------------
 const screenJoin = document.getElementById('screen-join');
 const screenLobby = document.getElementById('screen-lobby');
 const screenGame = document.getElementById('screen-game');
@@ -36,14 +34,16 @@ const voteList = document.getElementById('voteList');
 const resultArea = document.getElementById('resultArea');
 const backToLobbyBtn = document.getElementById('backToLobbyBtn');
 
-const roundNumber = document.getElementById('roundNumber');
-
-// ---------- State ----------
+// -----------------
+// State
+// -----------------
 let currentRoom = null;
 let myId = null;
-let cluesMapping = [];
+let submittedThisTurn = false;
 
-// ---------- Helpers ----------
+// -----------------
+// Helpers
+// -----------------
 function show(screen) {
   [screenJoin, screenLobby, screenGame].forEach(s => s.classList.add('hidden'));
   screen.classList.remove('hidden');
@@ -58,7 +58,9 @@ function renderPlayers(players, host) {
   });
 }
 
-// ---------- Create / Join Room ----------
+// -----------------
+// Create / Join
+// -----------------
 createBtn.onclick = () => {
   const name = nameInput.value || 'Player';
   socket.emit('createRoom', { name }, (resp) => {
@@ -86,7 +88,9 @@ joinBtn.onclick = () => {
   });
 };
 
-// ---------- Lobby ----------
+// -----------------
+// Lobby
+// -----------------
 socket.on('roomUpdate', (data) => {
   renderPlayers(data.players, data.host);
   hostControls.classList.toggle('hidden', data.host !== socket.id);
@@ -101,8 +105,12 @@ startRoundBtn.onclick = () => {
   });
 };
 
-// ---------- Game Flow ----------
+// -----------------
+// Game Flow
+// -----------------
 socket.on('roundStarted', ({ role, category, word, clueTurn }) => {
+  submittedThisTurn = false;
+
   show(screenGame);
 
   resultArea.classList.add('hidden');
@@ -113,7 +121,6 @@ socket.on('roundStarted', ({ role, category, word, clueTurn }) => {
 
   cluesList.innerHTML = '';
   voteList.innerHTML = '';
-  cluesMapping = [];
 
   roleInfo.textContent = role === 'chameleon'
     ? `You are THE CHAMELEON — category: ${category}`
@@ -131,18 +138,20 @@ submitClueBtn.onclick = () => {
   if (!clue) return alert('Enter a clue');
 
   socket.emit('submitClue', { roomCode: currentRoom, clue }, (resp) => {
-    if (resp && resp.ok) {
+    if (resp.ok) {
+      submittedThisTurn = true;
       clueInput.value = '';
       clueInputContainer.classList.add('hidden');
+    } else {
+      alert(resp.error);
     }
   });
 };
 
 socket.on('cluesUpdate', (clues) => {
+  if (!submittedThisTurn) return; // don’t show until you’ve submitted
   cluesArea.classList.remove('hidden');
   cluesList.innerHTML = '';
-  cluesMapping = clues.map(c => c.id);
-
   clues.forEach(c => {
     const li = document.createElement('li');
     li.textContent = `${c.name}: ${c.clues.join(', ')}`;
@@ -153,13 +162,15 @@ socket.on('cluesUpdate', (clues) => {
 socket.on('clueTurnUpdate', ({ clueTurn }) => {
   clueTurnDisplay.textContent = clueTurn;
   clueInputContainer.classList.remove('hidden');
+  submittedThisTurn = false;
 });
 
-// ---------- Voting ----------
+// -----------------
+// Voting
+// -----------------
 socket.on('votingStart', ({ clues }) => {
   votingArea.classList.remove('hidden');
   voteList.innerHTML = '';
-  cluesMapping = clues.map(c => c.id);
 
   clues.forEach(c => {
     const li = document.createElement('li');
@@ -179,7 +190,9 @@ socket.on('votesUpdate', (votes) => {
   console.log('Votes update:', votes);
 });
 
-// ---------- Chameleon Guess ----------
+// -----------------
+// Chameleon Guess
+// -----------------
 socket.on('chameleonCaught', ({ suspectId, chameleonId }) => {
   resultArea.classList.remove('hidden');
   resultArea.innerHTML = `<b>Suspect chosen</b>. If correct, chameleon will guess the word.`;
@@ -190,7 +203,9 @@ socket.on('promptGuess', () => {
   socket.emit('chameleonGuess', { roomCode: currentRoom, guess });
 });
 
-// ---------- Round Result ----------
+// -----------------
+// Round Result
+// -----------------
 socket.on('roundResult', (data) => {
   resultArea.classList.remove('hidden');
   backToLobbyBtn.classList.remove('hidden');
@@ -211,21 +226,11 @@ socket.on('roundResult', (data) => {
       <p>Word was: <b>${data.word}</b></p>
     `;
   }
-
-  // Show scores
-  const scoreList = document.createElement('div');
-  scoreList.innerHTML = '<h4>Scores</h4>';
-  const ul = document.createElement('ul');
-  for (const [id, info] of Object.entries(data.scores || {})) {
-    const li = document.createElement('li');
-    li.textContent = `${info.name}: ${info.score} pts ${id === data.chameleonId ? '(chameleon)' : ''}`;
-    ul.appendChild(li);
-  }
-  scoreList.appendChild(ul);
-  resultArea.appendChild(scoreList);
 });
 
-// ---------- Back to Lobby ----------
+// -----------------
+// Back to Lobby
+// -----------------
 backToLobbyBtn.onclick = () => {
   show(screenLobby);
 };

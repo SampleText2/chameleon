@@ -1,13 +1,23 @@
-/// server.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.static('client'));
+app.use(express.static('public')); // serves index.html, app.js, styles.css
+
+// -----------------
+// Game State
+// -----------------
+const rooms = {};
+
+// Helper: pick random element
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
 
 
 /* ---------- WORDS: small starter packs ---------- */
@@ -19,171 +29,200 @@ const WORDS = {
   Celebrities: ["Kim Kardashian","Kanye West","Oprah Winfrey","Ellen DeGeneres","Dwayne Johnson","Taylor Swift","Beyoncé","Brad Pitt","Angelina Jolie","Leonardo DiCaprio","Johnny Depp","Rihanna","Justin Bieber","Ariana Grande","Will Smith","Chris Hemsworth","Chris Evans","Scarlett Johansson","Gal Gadot","Kylie Jenner","Kendall Jenner","Selena Gomez","Demi Lovato","Miley Cyrus","Robert Downey Jr.","Tom Cruise","Emma Watson","Jennifer Lawrence","Natalie Portman","Charlize Theron","Keanu Reeves","Zendaya","Harry Styles","Drake","Cardi B","Nicki Minaj","Megan Thee Stallion","Chris Pratt","Galileo Paltrow","Jason Momoa","Matt Damon","George Clooney","Hugh Jackman","Margot Robbie","Timothée Chalamet","Zendaya","Shakira","Elon Musk","Oprah Winfrey"],
   Foods: ["Pizza","Burger","Sushi","Pasta","Salad","Chocolate","Ice Cream","Steak","Sandwich","Pancakes","Tacos","Fries","Doughnut","Soup","Rice","Noodles","Cheeseburger","Hot Dog","Bagel","Omelette"]
 };
-const rooms = {}; // roomCode -> room state
 
-function generateRoomCode() {
-  let code;
-  do { code = Math.random().toString(36).slice(2,6).toUpperCase(); } while (rooms[code]);
-  return code;
-}
 
-function pickCategoryAndWord() {
-  const categories = Object.keys(WORDS);
-  const category = categories[Math.floor(Math.random()*categories.length)];
-  const word = WORDS[category][Math.floor(Math.random()*WORDS[category].length)];
-  return { category, word };
-}
-
-function getRoomPublic(room) {
-  return {
-    players: Object.values(room.players).map(p => ({ id: p.id, name: p.name, score: p.score })),
-    host: room.host,
-    state: room.state,
-    round: room.round,
-    category: room.category || null,
-    clueTurn: room.clueTurn || 0
-  };
-}
-
-function getCluesPublic(room) {
-  const out = [];
-  for (const p of Object.values(room.players)) {
-    out.push({ id: p.id, name: p.name, clues: p.clues });
-  }
-  return out;
-}
-
-function getScores(room) {
-  const out = {};
-  for (const p of Object.values(room.players)) out[p.id] = { name: p.name, score: p.score };
-  return out;
-}
-
+// -----------------
+// Socket Handling
+// -----------------
 io.on('connection', (socket) => {
-  console.log('Socket connected', socket.id);
+  console.log('Player connected', socket.id);
 
-  socket.on('createRoom', ({ name }, cb) => {
-    const roomCode = generateRoomCode();
-    rooms[roomCode] = { players: {}, host: socket.id, state: 'lobby', round: 0, clueTurn: 1 };
+  // Create room
+  socket.on('createRoom', ({ name }, callback) => {
+    const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
+
+    rooms[roomCode] = {
+      host: socket.id,
+      players: [],
+      word: null,
+      category: null,
+      chameleon: null,
+      clues: {},
+      votes: {},
+      clueTurn: 1,
+      submittedThisTurn: new Set(),
+    };
+
     socket.join(roomCode);
-    rooms[roomCode].players[socket.id] = { id: socket.id, name: name || 'Player', score: 0, clues: [], votedFor: null };
-    cb({ ok:true, roomCode });
-    io.to(roomCode).emit('roomUpdate', getRoomPublic(rooms[roomCode]));
+
+    const player = { id: socket.id, name, clues: [], score: 0 };
+    rooms[roomCode].players.push(player);
+
+    callback({ roomCode });
+    io.to(roomCode).emit('roomUpdate', rooms[roomCode]);
   });
 
-  socket.on('joinRoom', ({ roomCode, name }, cb) => {
+  // Join room
+  socket.on('joinRoom', ({ roomCode, name }, callback) => {
     const room = rooms[roomCode];
-    if (!room) return cb({ ok:false, error:'Room not found' });
+    if (!room) return callback({ ok: false, error: 'Room not found' });
+
     socket.join(roomCode);
-    room.players[socket.id] = { id: socket.id, name: name || 'Player', score: 0, clues: [], votedFor: null };
-    cb({ ok:true, roomCode });
-    io.to(roomCode).emit('roomUpdate', getRoomPublic(room));
+    const player = { id: socket.id, name, clues: [], score: 0 };
+    room.players.push(player);
+
+    callback({ ok: true, roomCode });
+    io.to(roomCode).emit('roomUpdate', room);
   });
 
-  socket.on('startRound', ({ roomCode }, cb) => {
+  // Start round
+  socket.on('startRound', ({ roomCode }, callback) => {
     const room = rooms[roomCode];
     if (!room) return;
-    const playerIds = Object.keys(room.players);
-    if (playerIds.length < 3) return cb({ ok:false, error:'Need at least 3 players' });
-    const { category, word } = pickCategoryAndWord();
-    const chameleonId = playerIds[Math.floor(Math.random()*playerIds.length)];
+
+    const category = pick(Object.keys(categories));
+    const word = pick(categories[category]);
+
     room.category = category;
     room.word = word;
-    room.chameleonId = chameleonId;
-    room.state = 'clues';
-    room.round = (room.round || 0) + 1;
     room.clueTurn = 1;
-    for (const p of Object.values(room.players)) { p.clues = []; p.votedFor = null; }
+    room.submittedThisTurn = new Set();
 
-    for (const pid of playerIds) {
-      if (pid === chameleonId) io.to(pid).emit('roundStarted', { role: 'chameleon', category, clueTurn:1 });
-      else io.to(pid).emit('roundStarted', { role: 'player', category, word, clueTurn:1 });
-    }
-    io.to(roomCode).emit('roomUpdate', getRoomPublic(room));
-    cb({ ok:true });
+    room.players.forEach(p => (p.clues = []));
+    const cham = pick(room.players);
+    room.chameleon = cham.id;
+
+    // Tell each player their role
+    room.players.forEach((p) => {
+      io.to(p.id).emit('roundStarted', {
+        role: p.id === room.chameleon ? 'chameleon' : 'player',
+        category,
+        word: p.id === room.chameleon ? null : word,
+        clueTurn: room.clueTurn,
+      });
+    });
+
+    callback({ ok: true });
   });
 
-  socket.on('submitClue', ({ roomCode, clue }, cb) => {
+  // Submit clue
+  socket.on('submitClue', ({ roomCode, clue }, callback) => {
     const room = rooms[roomCode];
-    if (!room || room.state !== 'clues') return cb({ ok:false });
-    const player = room.players[socket.id];
-    if (!player) return cb({ ok:false });
+    if (!room) return;
 
-    clue = String(clue || '').trim().slice(0,30);
-    player.clues.push(clue || '(no clue)');
+    const player = room.players.find(p => p.id === socket.id);
+    if (!player) return;
 
-    // Determine next turn
-    let allDone = Object.values(room.players).every(p => p.clues.length >= 3);
-    io.to(roomCode).emit('cluesUpdate', getCluesPublic(room));
+    // Enforce max 3 clues
+    if (player.clues.length >= 3) {
+      return callback({ ok: false, error: 'Max 3 clues already given' });
+    }
 
-    if (allDone) {
-      room.state = 'voting';
-      io.to(roomCode).emit('votingStart', { clues: getCluesPublic(room) });
-    } else {
-      // Increase clueTurn counter
-      room.clueTurn += 1;
+    // Prevent duplicate submission in same turn
+    if (room.submittedThisTurn.has(socket.id)) {
+      return callback({ ok: false, error: 'Already gave a clue this turn' });
+    }
+
+    // Save clue
+    player.clues.push(clue);
+    room.submittedThisTurn.add(socket.id);
+
+    // Broadcast updated clues to players who already submitted
+    room.players.forEach(p => {
+      if (room.submittedThisTurn.has(p.id)) {
+        io.to(p.id).emit('cluesUpdate', room.players.map(pl => ({
+          id: pl.id,
+          name: pl.name,
+          clues: pl.clues
+        })));
+      }
+    });
+
+    // If all players gave clue → next turn
+    if (room.submittedThisTurn.size === room.players.length) {
+      room.submittedThisTurn.clear();
+      room.clueTurn++;
+
+      if (room.clueTurn > 3) {
+        // All 3 turns done → voting
+        io.to(roomCode).emit('votingStart', {
+          clues: room.players.map(p => ({
+            id: p.id,
+            name: p.name,
+            clues: p.clues
+          }))
+        });
+        return;
+      }
+
       io.to(roomCode).emit('clueTurnUpdate', { clueTurn: room.clueTurn });
     }
-    cb({ ok:true });
+
+    callback({ ok: true });
   });
 
-  socket.on('submitVote', ({ roomCode, targetPlayerId }, cb) => {
+  // Submit vote
+  socket.on('submitVote', ({ roomCode, targetPlayerId }, callback) => {
     const room = rooms[roomCode];
-    if (!room || room.state !== 'voting') return cb({ ok:false });
-    const player = room.players[socket.id];
-    if (!player) return cb({ ok:false });
-    player.votedFor = targetPlayerId;
+    if (!room) return;
 
-    const allVoted = Object.values(room.players).every(p => p.votedFor !== null);
-    io.to(roomCode).emit('votesUpdate', Object.values(room.players).map(p => ({ id:p.id, votedFor:p.votedFor })));
+    room.votes[socket.id] = targetPlayerId;
+    io.to(roomCode).emit('votesUpdate', room.votes);
 
-    if (allVoted) {
-      const counts = {};
-      for (const p of Object.values(room.players)) counts[p.votedFor] = (counts[p.votedFor]||0)+1;
-      let suspectId=null,max=-1;
-      for (const [id,c] of Object.entries(counts)) if(c>max){max=c;suspectId=id;}
-      const caught = suspectId === room.chameleonId;
-      if (caught) {
-        room.state = 'guess';
-        io.to(roomCode).emit('chameleonCaught', { suspectId, chameleonId: room.chameleonId });
-        io.to(room.chameleonId).emit('promptGuess',{});
+    if (Object.keys(room.votes).length === room.players.length) {
+      const tally = {};
+      for (const v of Object.values(room.votes)) {
+        tally[v] = (tally[v] || 0) + 1;
+      }
+      const suspectId = Object.keys(tally).reduce((a, b) =>
+        tally[a] > tally[b] ? a : b
+      );
+
+      io.to(roomCode).emit('chameleonCaught', {
+        suspectId,
+        chameleonId: room.chameleon
+      });
+
+      if (suspectId === room.chameleon) {
+        io.to(room.chameleon).emit('promptGuess');
       } else {
-        room.state = 'reveal';
-        room.players[room.chameleonId].score += 2;
-        io.to(roomCode).emit('roundResult',{ caught:false, chameleonId:room.chameleonId, word: room.word, scores:getScores(room) });
+        io.to(roomCode).emit('roundResult', {
+          caught: false,
+          chameleonId: room.chameleon,
+          word: room.word,
+        });
       }
     }
-    cb({ ok:true });
+
+    callback({ ok: true });
   });
 
-  socket.on('chameleonGuess', ({ roomCode, guess }, cb) => {
+  // Chameleon guess
+  socket.on('chameleonGuess', ({ roomCode, guess }) => {
     const room = rooms[roomCode];
-    if (!room || room.state !== 'guess') return cb({ ok:false });
-    const correct = String(guess||'').trim().toLowerCase() === String(room.word).toLowerCase();
-    if (correct) room.players[room.chameleonId].score += 3;
-    else {
-      for(const pid of Object.keys(room.players)) if(pid!==room.chameleonId) room.players[pid].score += 1;
-    }
-    room.state='reveal';
-    io.to(roomCode).emit('roundResult',{ caught:true, correct, guess, chameleonId:room.chameleonId, word: room.word, scores:getScores(room) });
-    cb({ ok:true });
+    if (!room) return;
+
+    const correct = guess.toLowerCase() === room.word.toLowerCase();
+    io.to(roomCode).emit('roundResult', {
+      caught: true,
+      chameleonId: room.chameleon,
+      guess,
+      correct,
+      word: room.word,
+    });
   });
 
   socket.on('disconnect', () => {
-    for (const [code, room] of Object.entries(rooms)) {
-      if(room.players[socket.id]){
-        delete room.players[socket.id];
-        io.to(code).emit('roomUpdate', getRoomPublic(room));
-        if(room.host===socket.id){
-          const ids=Object.keys(room.players);
-          room.host=ids[0]||null;
-          io.to(code).emit('hostChanged', room.host);
-        }
-        if(Object.keys(room.players).length===0) delete rooms[code];
-      }
+    console.log('Player disconnected', socket.id);
+    for (const code in rooms) {
+      const room = rooms[code];
+      room.players = room.players.filter(p => p.id !== socket.id);
+      if (room.players.length === 0) delete rooms[code];
+      else io.to(code).emit('roomUpdate', room);
     }
   });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT,()=>console.log(`Server running on http://localhost:${PORT}`));
+server.listen(3000, () => {
+  console.log('Server running on http://localhost:3000');
+});
