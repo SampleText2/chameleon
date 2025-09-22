@@ -1,4 +1,12 @@
+<<<<<<< HEAD
 const socket = io();
+=======
+// ====================
+// Chameleon App Client
+// ====================
+
+const socket = io("https://chameleon-twoq.onrender.com");
+>>>>>>> 00e75352f64d7a90f9b7087e70768ae5d346fe74
 
 // -----------------
 // UI references
