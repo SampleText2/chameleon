@@ -1,231 +1,210 @@
-// ====================
-// Chameleon App Client
-// ====================
+/// server.js
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 
-const socket = io();
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 
-// ---------- UI References ----------
-const screenJoin = document.getElementById('screen-join');
-const screenLobby = document.getElementById('screen-lobby');
-const screenGame = document.getElementById('screen-game');
+app.use(express.static('client'));
 
-const nameInput = document.getElementById('nameInput');
-const createBtn = document.getElementById('createBtn');
-const joinBtn = document.getElementById('joinBtn');
-const roomInput = document.getElementById('roomInput');
 
-const roomCodeDisplay = document.getElementById('roomCodeDisplay');
-const playersList = document.getElementById('playersList');
-const hostControls = document.getElementById('hostControls');
-const startRoundBtn = document.getElementById('startRoundBtn');
+/* ---------- WORDS: small starter packs ---------- */
+const WORDS = {
+  Fruits: ['Apple','Mango','Kiwi','Pineapple','Strawberry','Banana'],
+  Movies: ['Inception','Titanic','Avatar','Frozen','The Matrix','Jaws'],
+  Animals: ['Lion','Elephant','Giraffe','Penguin','Kangaroo','Dolphin'],
+  Singers: ["Beyoncé","Adele","Ed Sheeran","Taylor Swift","Bruno Mars","Lady Gaga","Justin Bieber","Rihanna","Ariana Grande",,"Michael Jackson","Billie Eilish","Elton John","Shakira","Frank Sinatra","Katy Perry","Madonna","Elvis Presley","David Bowie","Dua Lipa","Post Malone","Sam Smith","The Weeknd","Harry Styles","Selena Gomez","Drake","Jennifer Lopez","Celine Dion","Whitney Houston","Prince","Khalid","Miley Cyrus","John Lennon","Paul McCartney","Alicia Keys","Cardi B","Camila Cabello","Travis Scott","Lizzo","Nicki Minaj","Usher","Mariah Carey","Christina Aguilera","Shawn Mendes","Sia","Cher","Bob Dylan","Amy Winehouse","Stevie Wonder"],
+  Celebrities: ["Kim Kardashian","Kanye West","Oprah Winfrey","Ellen DeGeneres","Dwayne Johnson","Taylor Swift","Beyoncé","Brad Pitt","Angelina Jolie","Leonardo DiCaprio","Johnny Depp","Rihanna","Justin Bieber","Ariana Grande","Will Smith","Chris Hemsworth","Chris Evans","Scarlett Johansson","Gal Gadot","Kylie Jenner","Kendall Jenner","Selena Gomez","Demi Lovato","Miley Cyrus","Robert Downey Jr.","Tom Cruise","Emma Watson","Jennifer Lawrence","Natalie Portman","Charlize Theron","Keanu Reeves","Zendaya","Harry Styles","Drake","Cardi B","Nicki Minaj","Megan Thee Stallion","Chris Pratt","Galileo Paltrow","Jason Momoa","Matt Damon","George Clooney","Hugh Jackman","Margot Robbie","Timothée Chalamet","Zendaya","Shakira","Elon Musk","Oprah Winfrey"],
+  Foods: ["Pizza","Burger","Sushi","Pasta","Salad","Chocolate","Ice Cream","Steak","Sandwich","Pancakes","Tacos","Fries","Doughnut","Soup","Rice","Noodles","Cheeseburger","Hot Dog","Bagel","Omelette"]
+};
+const rooms = {}; // roomCode -> room state
 
-const roleInfo = document.getElementById('roleInfo');
-const wordInfo = document.getElementById('wordInfo');
-
-const clueInputContainer = document.getElementById('clueInputContainer');
-const clueInput = document.getElementById('clueInput');
-const submitClueBtn = document.getElementById('submitClueBtn');
-
-const clueTurnDisplay = document.getElementById('clueTurnDisplay');
-const cluesArea = document.getElementById('cluesArea');
-const cluesList = document.getElementById('cluesList');
-
-const votingArea = document.getElementById('votingArea');
-const voteList = document.getElementById('voteList');
-
-const resultArea = document.getElementById('resultArea');
-const backToLobbyBtn = document.getElementById('backToLobbyBtn');
-
-const roundNumber = document.getElementById('roundNumber');
-
-// ---------- State ----------
-let currentRoom = null;
-let myId = null;
-let cluesMapping = [];
-
-// ---------- Helpers ----------
-function show(screen) {
-  [screenJoin, screenLobby, screenGame].forEach(s => s.classList.add('hidden'));
-  screen.classList.remove('hidden');
+function generateRoomCode() {
+  let code;
+  do { code = Math.random().toString(36).slice(2,6).toUpperCase(); } while (rooms[code]);
+  return code;
 }
 
-function renderPlayers(players, host) {
-  playersList.innerHTML = '';
-  players.forEach(p => {
-    const div = document.createElement('div');
-    div.textContent = `${p.name} — ${p.score} pts ${p.id === host ? '(host)' : ''}`;
-    playersList.appendChild(div);
-  });
+function pickCategoryAndWord() {
+  const categories = Object.keys(WORDS);
+  const category = categories[Math.floor(Math.random()*categories.length)];
+  const word = WORDS[category][Math.floor(Math.random()*WORDS[category].length)];
+  return { category, word };
 }
 
-// ---------- Create / Join Room ----------
-createBtn.onclick = () => {
-  const name = nameInput.value || 'Player';
-  socket.emit('createRoom', { name }, (resp) => {
-    if (resp && resp.roomCode) {
-      currentRoom = resp.roomCode;
-      roomCodeDisplay.textContent = currentRoom;
-      show(screenLobby);
+function getRoomPublic(room) {
+  return {
+    players: Object.values(room.players).map(p => ({ id: p.id, name: p.name, score: p.score })),
+    host: room.host,
+    state: room.state,
+    round: room.round,
+    category: room.category || null,
+    clueTurn: room.clueTurn || 0
+  };
+}
+
+function getCluesPublic(room) {
+  const out = [];
+  for (const p of Object.values(room.players)) {
+    out.push({ id: p.id, name: p.name, clues: p.clues });
+  }
+  return out;
+}
+
+function getScores(room) {
+  const out = {};
+  for (const p of Object.values(room.players)) out[p.id] = { name: p.name, score: p.score };
+  return out;
+}
+
+io.on('connection', (socket) => {
+  console.log('Socket connected', socket.id);
+
+  socket.on('createRoom', ({ name }, cb) => {
+    const roomCode = generateRoomCode();
+    rooms[roomCode] = { players: {}, host: socket.id, state: 'lobby', round: 0, clueTurn: 1 };
+    socket.join(roomCode);
+    rooms[roomCode].players[socket.id] = { id: socket.id, name: name || 'Player', score: 0, clues: [], votedFor: null };
+    cb({ ok:true, roomCode });
+    io.to(roomCode).emit('roomUpdate', getRoomPublic(rooms[roomCode]));
+  });
+
+  socket.on('joinRoom', ({ roomCode, name }, cb) => {
+    const room = rooms[roomCode];
+    if (!room) return cb({ ok:false, error:'Room not found' });
+    socket.join(roomCode);
+    room.players[socket.id] = { id: socket.id, name: name || 'Player', score: 0, clues: [], votedFor: null };
+    cb({ ok:true, roomCode });
+    io.to(roomCode).emit('roomUpdate', getRoomPublic(room));
+  });
+
+  socket.on('startRound', ({ roomCode }, cb) => {
+    const room = rooms[roomCode];
+    if (!room) return;
+    const playerIds = Object.keys(room.players);
+    if (playerIds.length < 3) return cb({ ok:false, error:'Need at least 3 players' });
+    const { category, word } = pickCategoryAndWord();
+    const chameleonId = playerIds[Math.floor(Math.random()*playerIds.length)];
+    room.category = category;
+    room.word = word;
+    room.chameleonId = chameleonId;
+    room.state = 'clues';
+    room.round = (room.round || 0) + 1;
+    room.clueTurn = 1;
+    for (const p of Object.values(room.players)) { p.clues = []; p.votedFor = null; }
+
+    for (const pid of playerIds) {
+      if (pid === chameleonId) io.to(pid).emit('roundStarted', { role: 'chameleon', category, clueTurn:1 });
+      else io.to(pid).emit('roundStarted', { role: 'player', category, word, clueTurn:1 });
     }
+    io.to(roomCode).emit('roomUpdate', getRoomPublic(room));
+    if (cb) cb({ ok: true });
   });
-};
 
-joinBtn.onclick = () => {
-  const name = nameInput.value || 'Player';
-  const code = (roomInput.value || '').trim().toUpperCase();
-  if (!code) return alert('Enter a room code');
+socket.on('submitClue', ({ roomCode, clue }, cb) => {
+  const room = rooms[roomCode];
+  if (!room || room.state !== 'clues') return cb({ ok:false });
+  const player = room.players[socket.id];
+  if (!player) return cb({ ok:false });
 
-  socket.emit('joinRoom', { roomCode: code, name }, (resp) => {
-    if (resp && resp.ok) {
-      currentRoom = resp.roomCode;
-      roomCodeDisplay.textContent = currentRoom;
-      show(screenLobby);
-    } else {
-      alert(resp.error || 'Failed to join');
-    }
-  });
-};
+  clue = String(clue || '').trim().slice(0,30);
+  player.clues.push(clue || '(no clue)');
 
-// ---------- Lobby ----------
-socket.on('roomUpdate', (data) => {
-  renderPlayers(data.players, data.host);
-  hostControls.classList.toggle('hidden', data.host !== socket.id);
-  if (!myId) myId = socket.id;
-});
+  const playerIds = Object.keys(room.players);
 
-startRoundBtn.onclick = () => {
-  socket.emit('startRound', { roomCode: currentRoom }, (resp) => {
-    if (resp && resp.ok) {
-      show(screenGame);
-    }
-  });
-};
+  // Check if everyone has submitted for this clue round
+  const allSubmittedThisRound = playerIds.every(pid => room.players[pid].clues.length >= room.clueTurn);
 
-// ---------- Game Flow ----------
-socket.on('roundStarted', ({ role, category, word, clueTurn }) => {
-  show(screenGame);
-
-  resultArea.classList.add('hidden');
-  backToLobbyBtn.classList.add('hidden');
-  cluesArea.classList.add('hidden');
-  votingArea.classList.add('hidden');
-  clueInputContainer.classList.remove('hidden');
-
-  cluesList.innerHTML = '';
-  voteList.innerHTML = '';
-  cluesMapping = [];
-
-  roleInfo.textContent = role === 'chameleon'
-    ? `You are THE CHAMELEON — category: ${category}`
-    : `You are a player — category: ${category}`;
-
-  wordInfo.textContent = role === 'chameleon'
-    ? 'You do NOT see the word. Try to blend in.'
-    : `Secret word: ${word}`;
-
-  clueTurnDisplay.textContent = clueTurn;
-});
-
-submitClueBtn.onclick = () => {
-  const clue = (clueInput.value || '').trim();
-  if (!clue) return alert('Enter a clue');
-
-  socket.emit('submitClue', { roomCode: currentRoom, clue }, (resp) => {
-    if (resp && resp.ok) {
-      clueInput.value = '';
-      clueInputContainer.classList.add('hidden');
-    }
-  });
-};
-
-socket.on('cluesUpdate', (clues) => {
-  cluesArea.classList.remove('hidden');
-  cluesList.innerHTML = '';
-  cluesMapping = clues.map(c => c.id);
-
-  clues.forEach(c => {
-    const li = document.createElement('li');
-    li.textContent = `${c.name}: ${c.clues.join(', ')}`;
-    cluesList.appendChild(li);
-  });
-});
-
-socket.on('clueTurnUpdate', ({ clueTurn }) => {
-  clueTurnDisplay.textContent = clueTurn;
-  clueInputContainer.classList.remove('hidden');
-});
-
-// ---------- Voting ----------
-socket.on('votingStart', ({ clues }) => {
-  votingArea.classList.remove('hidden');
-  voteList.innerHTML = '';
-  cluesMapping = clues.map(c => c.id);
-
-  clues.forEach(c => {
-    const li = document.createElement('li');
-    const btn = document.createElement('button');
-    btn.textContent = `Vote ${c.name}`;
-    btn.onclick = () => {
-      socket.emit('submitVote', { roomCode: currentRoom, targetPlayerId: c.id }, (resp) => {
-        if (!resp || !resp.ok) alert('Vote failed');
-      });
-    };
-    li.appendChild(btn);
-    voteList.appendChild(li);
-  });
-});
-
-socket.on('votesUpdate', (votes) => {
-  console.log('Votes update:', votes);
-});
-
-// ---------- Chameleon Guess ----------
-socket.on('chameleonCaught', ({ suspectId, chameleonId }) => {
-  resultArea.classList.remove('hidden');
-  resultArea.innerHTML = `<b>Suspect chosen</b>. If correct, chameleon will guess the word.`;
-});
-
-socket.on('promptGuess', () => {
-  const guess = prompt('You were caught! Guess the secret word:');
-  socket.emit('chameleonGuess', { roomCode: currentRoom, guess });
-});
-
-// ---------- Round Result ----------
-socket.on('roundResult', (data) => {
-  resultArea.classList.remove('hidden');
-  backToLobbyBtn.classList.remove('hidden');
-  votingArea.classList.add('hidden');
-  cluesArea.classList.add('hidden');
-
-  if (!data.caught) {
-    resultArea.innerHTML = `
-      <h3>The Chameleon escaped!</h3>
-      <p>Chameleon: ${data.chameleonId}</p>
-      <p>Word was: <b>${data.word}</b></p>
-    `;
+  if (allSubmittedThisRound) {
+    // Start next clue round
+    room.clueTurn += 1;
+    room.currentTurnPlayer = playerIds[0]; // first player starts next turn
   } else {
-    const ok = data.correct ? '✔️ Chameleon guessed correctly!' : '❌ Chameleon guessed wrong.';
-    resultArea.innerHTML = `
-      <h3>${ok}</h3>
-      <p>Chameleon: ${data.chameleonId} guessed: "${data.guess}"</p>
-      <p>Word was: <b>${data.word}</b></p>
-    `;
+    // Move to next player in current round
+    let currentIndex = playerIds.indexOf(room.currentTurnPlayer);
+    let nextIndex = (currentIndex + 1) % playerIds.length;
+    // Skip players who have already submitted for this turn
+    while (room.players[playerIds[nextIndex]].clues.length >= room.clueTurn) {
+      nextIndex = (nextIndex + 1) % playerIds.length;
+    }
+    room.currentTurnPlayer = playerIds[nextIndex];
   }
 
-  // Show scores
-  const scoreList = document.createElement('div');
-  scoreList.innerHTML = '<h4>Scores</h4>';
-  const ul = document.createElement('ul');
-  for (const [id, info] of Object.entries(data.scores || {})) {
-    const li = document.createElement('li');
-    li.textContent = `${info.name}: ${info.score} pts ${id === data.chameleonId ? '(chameleon)' : ''}`;
-    ul.appendChild(li);
+  io.to(roomCode).emit('cluesUpdate', getCluesPublic(room));
+  io.to(roomCode).emit('clueTurnUpdate', {
+    clueTurn: room.clueTurn,
+    currentPlayerId: room.currentTurnPlayer
+  });
+
+  // If all players have submitted 3 clues, move to voting
+  const allDone = Object.values(room.players).every(p => p.clues.length >= 3);
+  if (allDone) {
+    room.state = 'voting';
+    io.to(roomCode).emit('votingStart', { clues: getCluesPublic(room) });
   }
-  scoreList.appendChild(ul);
-  resultArea.appendChild(scoreList);
+
+  if (cb) cb({ ok: true });
 });
 
-// ---------- Back to Lobby ----------
-backToLobbyBtn.onclick = () => {
-  show(screenLobby);
-};
+  socket.on('submitVote', ({ roomCode, targetPlayerId }, cb) => {
+    const room = rooms[roomCode];
+    if (!room || room.state !== 'voting') return cb({ ok:false });
+    const player = room.players[socket.id];
+    if (!player) return cb({ ok:false });
+    player.votedFor = targetPlayerId;
+
+    const allVoted = Object.values(room.players).every(p => p.votedFor !== null);
+    io.to(roomCode).emit('votesUpdate', Object.values(room.players).map(p => ({ id:p.id, votedFor:p.votedFor })));
+
+    if (allVoted) {
+      const counts = {};
+      for (const p of Object.values(room.players)) counts[p.votedFor] = (counts[p.votedFor]||0)+1;
+      let suspectId=null,max=-1;
+      for (const [id,c] of Object.entries(counts)) if(c>max){max=c;suspectId=id;}
+      const caught = suspectId === room.chameleonId;
+      if (caught) {
+        room.state = 'guess';
+        io.to(roomCode).emit('chameleonCaught', { suspectId, chameleonId: room.chameleonId });
+        io.to(room.chameleonId).emit('promptGuess',{});
+      } else {
+        room.state = 'reveal';
+        room.players[room.chameleonId].score += 2;
+        io.to(roomCode).emit('roundResult',{ caught:false, chameleonId:room.chameleonId, word: room.word, scores:getScores(room) });
+      }
+    }
+    if (cb) cb({ ok: true });
+  });
+
+  socket.on('chameleonGuess', ({ roomCode, guess }, cb) => {
+    const room = rooms[roomCode];
+    if (!room || room.state !== 'guess') return cb({ ok:false });
+    const correct = String(guess||'').trim().toLowerCase() === String(room.word).toLowerCase();
+    if (correct) room.players[room.chameleonId].score += 3;
+    else {
+      for(const pid of Object.keys(room.players)) if(pid!==room.chameleonId) room.players[pid].score += 1;
+    }
+    room.state='reveal';
+    io.to(roomCode).emit('roundResult',{ caught:true, correct, guess, chameleonId:room.chameleonId, word: room.word, scores:getScores(room) });
+    if (cb) cb({ ok: true });
+  });
+
+  socket.on('disconnect', () => {
+    for (const [code, room] of Object.entries(rooms)) {
+      if(room.players[socket.id]){
+        delete room.players[socket.id];
+        io.to(code).emit('roomUpdate', getRoomPublic(room));
+        if(room.host===socket.id){
+          const ids=Object.keys(room.players);
+          room.host=ids[0]||null;
+          io.to(code).emit('hostChanged', room.host);
+        }
+        if(Object.keys(room.players).length===0) delete rooms[code];
+      }
+    }
+  });
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT,()=>console.log(`Server running on http://localhost:${PORT}`));
