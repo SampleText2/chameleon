@@ -35,6 +35,8 @@ const voteList = document.getElementById('voteList');
 
 const resultArea = document.getElementById('resultArea');
 const backToLobbyBtn = document.getElementById('backToLobbyBtn');
+const hintInput = document.getElementById("hintInput");
+const hintButton = document.getElementById("hintButton");
 
 const roundNumber = document.getElementById('roundNumber');
 
@@ -254,3 +256,18 @@ socket.on('roundResult', (data) => {
 backToLobbyBtn.onclick = () => {
   show(screenLobby);
 };
+
+document.querySelectorAll("input").forEach(input => {
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+
+      // If the input has a sibling button, click it
+      const parent = input.parentElement;
+      const button = parent.querySelector("button");
+      if (button) {
+        button.click();
+      }
+    }
+  });
+});

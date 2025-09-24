@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mafia Game</title>
+  <link rel="stylesheet" href="mafia.css">
+</head>
+<body>
+  <div id="screen-join">
+    <h1>Mafia Game</h1>
+    <input type="text" id="nameInput" placeholder="Enter your name">
+    <button id="createBtn">Create Room</button>
+    <input type="text" id="roomInput" placeholder="Room Code">
+    <button id="joinBtn">Join Room</button>
+  </div>
+
+  <div id="screen-lobby" class="hidden">
+    <h2>Lobby — Room <span id="roomCodeDisplay"></span></h2>
+    <div id="playersList"></div>
+    <div id="hostControls">
+      <button id="startGameBtn">Start Game</button>
+    </div>
+  </div>
+
+  <div id="screen-game" class="hidden">
+    <h2>Role: <span id="roleInfo"></span></h2>
+    <div id="gameInfo"></div>
+
+    <div id="actionArea">
+      <input type="text" id="targetInput" placeholder="Enter player name">
+      <button id="submitActionBtn">Submit</button>
+    </div>
+
+    <div id="votesArea" class="hidden">
+      <h3>Voting</h3>
+      <div id="voteList"></div>
+    </div>
+
+    <div id="resultArea" class="hidden"></div>
+    <button id="backToLobbyBtn" class="hidden">Back to Lobby</button>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="mafia.js"></script>
+</body>
+</html>
